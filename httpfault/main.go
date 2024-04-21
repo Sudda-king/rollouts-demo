@@ -60,7 +60,7 @@ func init() {
         }
     }
 
-
+    dynamicErrorRate = 0
 }
 
 
@@ -85,9 +85,6 @@ func main() {
     router.Handle("/", http.StripPrefix("/", http.FileServer(http.Dir("./"))))
     router.HandleFunc("/color", getColor)
 
-
-
-
     server := &http.Server{
         Addr:    listenAddr,
         Handler: router,
@@ -104,7 +101,8 @@ func main() {
     done := make(chan bool)
     quit := make(chan os.Signal, 1)
     signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-    dynamicErrorRate = 0
+    
+
     go func() {
         ticker := time.NewTicker(30 * time.Second)
         defer ticker.Stop()

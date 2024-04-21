@@ -29,16 +29,11 @@ const (
 
 var (
 	color  = os.Getenv("COLOR")
-	colors = []string{
-		"red",
-		"orange",
-		"yellow",
-		"green",
-		"blue",
-		"purple",
-	}
+	colors = []string{"green"}
 	envLatency   float64
 	envErrorRate int
+	dynamicErrorRate int
+	dynamicLatency float64 // New variable to handle dynamic latency increment
 )
 
 func init() {
@@ -57,6 +52,8 @@ func init() {
 			panic(fmt.Sprintf("failed to parse ERROR_RATE: %s", envErrorRateStr))
 		}
 	}
+	dynamicErrorRate = 0
+	dynamicLatency = 0 // Initialize dynamic latency
 }
 
 func main() {
@@ -93,6 +90,39 @@ func main() {
 	done := make(chan bool)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+
+	go func() {
+        ticker := time.NewTicker(60 * time.Second)
+        defer ticker.Stop()
+        for {
+            select {
+            case <-ticker.C:
+				if dynamicLatency < 5 {
+					dynamicLatency += 1 // Increase latency by 0.2 seconds every 30 seconds
+				}
+            case <-quit:
+                return
+            }
+        }
+    }()
+
+
+	go func() {
+        ticker := time.NewTicker(30 * time.Second)
+        defer ticker.Stop()
+        for {
+            select {
+            case <-ticker.C:
+                if dynamicErrorRate < 100 {
+                    dynamicErrorRate += 5
+                }
+            case <-quit:
+                return
+            }
+        }
+    }()
+
 
 	go func() {
 		sig := <-quit
@@ -169,26 +199,36 @@ func getColor(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var delayLength float64
-	var delayLengthStr string
-	if colorParams.DelayLength > 0 {
-		delayLength = colorParams.DelayLength
-	} else if envLatency > 0 {
-		delayLength = envLatency
-	}
-	if delayLength > 0 {
-		delayLengthStr = fmt.Sprintf(" (%fs)", delayLength)
-		time.Sleep(time.Duration(delayLength) * time.Second)
+	 var delayLength float64
+    if colorParams.DelayLength > 0 {
+        delayLength = colorParams.DelayLength
+    } else if envLatency > 0 {
+        delayLength = envLatency
+    }
+
+    // Apply dynamicLatency, incrementing with time
+	
+	if delayLength > 0{
+		delayLength += dynamicLatency
 	}
 
-	statusCode := http.StatusOK
-	if colorParams.Return500Probability != nil && *colorParams.Return500Probability > 0 && *colorParams.Return500Probability >= rand.Intn(100) {
-		statusCode = http.StatusInternalServerError
-	} else if envErrorRate > 0 && rand.Intn(100) >= envErrorRate {
-		statusCode = http.StatusInternalServerError
-	}
-	printColor(colorToReturn, w, statusCode)
-	log.Printf("%d - %s%s\n", statusCode, colorToReturn, delayLengthStr)
+	delayLengthStr := fmt.Sprintf(" (%fs)", delayLength)
+    if delayLength > 0 {
+        
+        time.Sleep(time.Duration(delayLength) * time.Second)
+        log.Printf("%d - %s%s\n", http.StatusOK, colorToReturn, delayLengthStr)
+    }
+
+    statusCode := http.StatusOK
+    if colorParams.Return500Probability != nil && *colorParams.Return500Probability > 0 && rand.Intn(100) < *colorParams.Return500Probability {
+        statusCode = http.StatusInternalServerError
+    } else if dynamicErrorRate > 0 && rand.Intn(100) < dynamicErrorRate {
+        statusCode = http.StatusInternalServerError
+    }
+
+
+    printColor(colorToReturn, w, statusCode)
+    log.Printf("%d - %s%s\n", statusCode, colorToReturn, delayLengthStr)
 }
 
 func printColor(colorToPrint string, w http.ResponseWriter, statusCode int) {
